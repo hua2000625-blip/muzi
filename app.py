@@ -1,4 +1,4 @@
-"""Download a share-link MP4 or launch a logged-in quality download route."""
+"""Download a WeChat Channels MP4 from a share link, without user login."""
 
 from __future__ import annotations
 
@@ -7,12 +7,9 @@ import json
 import os
 import queue
 import re
-import shutil
-import subprocess
 import sys
 import threading
 import tkinter as tk
-import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from urllib.error import HTTPError, URLError
@@ -21,7 +18,6 @@ from urllib.request import ProxyHandler, Request, build_opener, getproxies, urlo
 
 
 PARSER_URL = "https://v.mtotech.com/api/resolve"
-WX_CHANNEL_RELEASES = "https://github.com/nobiyou/wx_channel/releases"
 LINK_RE = re.compile(r"https://weixin\.qq\.com/sph/[A-Za-z0-9_-]+/?", re.I)
 DEFAULT_OUTPUT = Path.home() / "Downloads" / "微信视频号"
 CHUNK_SIZE = 1024 * 1024
@@ -43,38 +39,6 @@ def safe_name(value: str, limit: int) -> str:
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
     return value[:limit].rstrip(" .") or "视频"
-
-
-def find_wechat_executable() -> Path | None:
-    """Find the installed official WeChat desktop client without launching it."""
-    if os.name != "nt":
-        return None
-    candidates: list[Path] = []
-    try:
-        import winreg
-
-        for root, key in (
-            (winreg.HKEY_CLASSES_ROOT, r"weixin\shell\open\command"),
-            (winreg.HKEY_CURRENT_USER, r"Software\Classes\weixin\shell\open\command"),
-        ):
-            try:
-                with winreg.OpenKey(root, key) as handle:
-                    command = winreg.QueryValueEx(handle, "")[0]
-                match = re.match(r'\s*(?:"([^"]+\.exe)"|([^\s"]+\.exe))', command, re.I)
-                if match:
-                    candidates.append(Path(match.group(1) or match.group(2)))
-            except OSError:
-                continue
-    except ImportError:
-        pass
-    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
-        if base:
-            candidates.extend((Path(base) / "Tencent" / "Weixin" / "Weixin.exe", Path(base) / "Tencent" / "WeChat" / "WeChat.exe"))
-    for name in ("Weixin.exe", "WeChat.exe"):
-        found = shutil.which(name)
-        if found:
-            candidates.append(Path(found))
-    return next((path for path in candidates if path.is_file()), None)
 
 
 def open_request(request: Request, timeout: int):
@@ -189,7 +153,7 @@ def download_video(link: str, folder: Path, report, cancel: threading.Event) -> 
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("微信视频号下载")
+        self.title("微信视频号链接下载")
         self.geometry("720x500")
         self.minsize(560, 400)
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -208,25 +172,16 @@ class App(tk.Tk):
         ttk.Button(row, text="浏览…", command=self.choose_folder).pack(side="left", padx=(8, 0))
         controls = ttk.Frame(frame)
         controls.pack(fill="x")
-        self.start_button = ttk.Button(controls, text="免登录下载", command=self.start)
+        self.start_button = ttk.Button(controls, text="开始下载", command=self.start)
         self.start_button.pack(side="left")
         self.cancel_button = ttk.Button(controls, text="取消", command=self.stop, state="disabled")
         self.cancel_button.pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="打开微信（扫码登录）", command=self.open_wechat_login).pack(
-            side="left", padx=(16, 0)
-        )
-        ttk.Button(controls, text="启动高清工具", command=self.launch_high_quality).pack(
-            side="left", padx=(8, 0)
-        )
-        ttk.Button(controls, text="获取高清工具", command=lambda: webbrowser.open(WX_CHANNEL_RELEASES)).pack(
-            side="left", padx=(8, 0)
-        )
         ttk.Label(frame, text="运行记录").pack(anchor="w", pady=(16, 6))
         self.log = scrolledtext.ScrolledText(frame, height=8, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True)
         ttk.Label(
             frame,
-            text="扫码登录发生在微信客户端；本程序不接收微信 OAuth 授权。高清方式另需 wx_channel。",
+            text="免微信扫码；解析依赖第三方 v.mtotech.com，分享链接会发送至该站。",
             foreground="#555555",
         ).pack(anchor="w", pady=(10, 0))
         self.after(100, self.poll_events)
@@ -235,55 +190,6 @@ class App(tk.Tk):
         selected = filedialog.askdirectory(initialdir=self.folder.get() or str(Path.home()))
         if selected:
             self.folder.set(selected)
-
-    def open_wechat_login(self) -> None:
-        executable = find_wechat_executable()
-        if not executable:
-            messagebox.showerror("未找到微信", "未找到已安装的微信 Windows 客户端。请先从微信官网下载并安装。")
-            return
-        try:
-            subprocess.Popen([str(executable)], cwd=str(executable.parent))
-        except OSError as exc:
-            messagebox.showerror("打开微信失败", str(exc))
-            return
-        self.write_log("已打开微信客户端。若尚未登录，请用手机微信扫码并确认；已登录时会显示现有会话。")
-        self.write_log("微信登录仅发生在官方客户端，不会将账号授权给本程序；高清下载还需启动独立工具。")
-
-    def launch_high_quality(self) -> None:
-        selected = filedialog.askopenfilename(
-            title="选择从 wx_channel 官方发布页获取的标准版 EXE",
-            filetypes=[("Windows 程序", "*.exe")],
-        )
-        if not selected:
-            return
-        executable = Path(selected)
-        if not re.fullmatch(r"wx_channel(?:_v\d+\.\d+\.\d+)?\.exe", executable.name, re.I) or not executable.is_file():
-            messagebox.showerror("程序错误", "请选择 wx_channel 标准版 EXE；请从项目官方 GitHub Releases 获取。")
-            return
-        folder_text = self.folder.get().strip()
-        if not folder_text:
-            messagebox.showerror("保存位置错误", "请选择保存文件夹。")
-            return
-        if not messagebox.askyesno(
-            "启动第三方高清工具",
-            "将启动你选定的 wx_channel 标准版。该工具会启用本地代理，首次运行可能安装 Windows 受信任的根证书。\n\n"
-            "请确认你了解这项系统更改，且程序来自其官方 GitHub 发布页。是否继续？",
-        ):
-            return
-        env = os.environ.copy()
-        env["WX_CHANNEL_DOWNLOADS_DIR"] = str(Path(folder_text).expanduser().absolute())
-        try:
-            subprocess.Popen([str(executable)], cwd=str(executable.parent), env=env)
-        except OSError as exc:
-            messagebox.showerror("启动失败", f"无法启动 wx_channel：{exc}")
-            return
-        links = extract_links(self.links.get("1.0", "end"))
-        if links:
-            self.clipboard_clear()
-            self.clipboard_append(links[0])
-            self.write_log(f"已将第一条分享链接复制到剪贴板：{links[0]}")
-        self.write_log("高清工具已启动。请在微信客户端登录并打开目标视频，再在页面内选择下载。")
-        self.write_log("已设置高清工具的下载目录；请在工具中确认实际保存路径。画质以微信页面提供的视频流为准。")
 
     def write_log(self, line: str) -> None:
         self.log.configure(state="normal")
