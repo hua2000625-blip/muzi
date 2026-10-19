@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -42,6 +43,38 @@ def safe_name(value: str, limit: int) -> str:
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
     return value[:limit].rstrip(" .") or "视频"
+
+
+def find_wechat_executable() -> Path | None:
+    """Find the installed official WeChat desktop client without launching it."""
+    if os.name != "nt":
+        return None
+    candidates: list[Path] = []
+    try:
+        import winreg
+
+        for root, key in (
+            (winreg.HKEY_CLASSES_ROOT, r"weixin\shell\open\command"),
+            (winreg.HKEY_CURRENT_USER, r"Software\Classes\weixin\shell\open\command"),
+        ):
+            try:
+                with winreg.OpenKey(root, key) as handle:
+                    command = winreg.QueryValueEx(handle, "")[0]
+                match = re.match(r'\s*(?:"([^"]+\.exe)"|([^\s"]+\.exe))', command, re.I)
+                if match:
+                    candidates.append(Path(match.group(1) or match.group(2)))
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            candidates.extend((Path(base) / "Tencent" / "Weixin" / "Weixin.exe", Path(base) / "Tencent" / "WeChat" / "WeChat.exe"))
+    for name in ("Weixin.exe", "WeChat.exe"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def open_request(request: Request, timeout: int):
@@ -179,8 +212,11 @@ class App(tk.Tk):
         self.start_button.pack(side="left")
         self.cancel_button = ttk.Button(controls, text="取消", command=self.stop, state="disabled")
         self.cancel_button.pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="微信登录·高清下载", command=self.launch_high_quality).pack(
+        ttk.Button(controls, text="打开微信（扫码登录）", command=self.open_wechat_login).pack(
             side="left", padx=(16, 0)
+        )
+        ttk.Button(controls, text="启动高清工具", command=self.launch_high_quality).pack(
+            side="left", padx=(8, 0)
         )
         ttk.Button(controls, text="获取高清工具", command=lambda: webbrowser.open(WX_CHANNEL_RELEASES)).pack(
             side="left", padx=(8, 0)
@@ -190,7 +226,7 @@ class App(tk.Tk):
         self.log.pack(fill="both", expand=True)
         ttk.Label(
             frame,
-            text="免登录方式会将分享链接发送至第三方 v.mtotech.com；高清方式需另装 wx_channel 并登录微信。",
+            text="扫码登录发生在微信客户端；本程序不接收微信 OAuth 授权。高清方式另需 wx_channel。",
             foreground="#555555",
         ).pack(anchor="w", pady=(10, 0))
         self.after(100, self.poll_events)
@@ -199,6 +235,19 @@ class App(tk.Tk):
         selected = filedialog.askdirectory(initialdir=self.folder.get() or str(Path.home()))
         if selected:
             self.folder.set(selected)
+
+    def open_wechat_login(self) -> None:
+        executable = find_wechat_executable()
+        if not executable:
+            messagebox.showerror("未找到微信", "未找到已安装的微信 Windows 客户端。请先从微信官网下载并安装。")
+            return
+        try:
+            subprocess.Popen([str(executable)], cwd=str(executable.parent))
+        except OSError as exc:
+            messagebox.showerror("打开微信失败", str(exc))
+            return
+        self.write_log("已打开微信客户端。若尚未登录，请用手机微信扫码并确认；已登录时会显示现有会话。")
+        self.write_log("微信登录仅发生在官方客户端，不会将账号授权给本程序；高清下载还需启动独立工具。")
 
     def launch_high_quality(self) -> None:
         selected = filedialog.askopenfilename(
@@ -233,7 +282,7 @@ class App(tk.Tk):
             self.clipboard_clear()
             self.clipboard_append(links[0])
             self.write_log(f"已将第一条分享链接复制到剪贴板：{links[0]}")
-        self.write_log("高清工具已启动。请登录微信并打开目标视频，再在页面内选择下载。")
+        self.write_log("高清工具已启动。请在微信客户端登录并打开目标视频，再在页面内选择下载。")
         self.write_log("已设置高清工具的下载目录；请在工具中确认实际保存路径。画质以微信页面提供的视频流为准。")
 
     def write_log(self, line: str) -> None:

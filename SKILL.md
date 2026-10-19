@@ -1,6 +1,6 @@
 ---
 name: wechat-channels-download
-description: Save WeChat Channels videos from weixin.qq.com/sph share links. Launch the logged-in WeChat playback route for the highest available quality, or use the bundled link parser for a quick download.
+description: Save WeChat Channels videos from weixin.qq.com/sph share links. Use a logged-in official WeChat desktop playback route for the highest available quality, or the bundled link parser for a quick download.
 ---
 
 # WeChat Channels download
@@ -11,10 +11,12 @@ Choose the route that matches the user's quality and login requirements. For pla
 
 1. Check whether the standard Windows edition of [nobiyou/wx_channel](https://github.com/nobiyou/wx_channel) is already available. If not, consult its [current release](https://github.com/nobiyou/wx_channel/releases) and installation instructions. This is a separate third-party tool, not bundled with this Skill or `app.py`.
 2. Before starting it for the first time, tell the user that it uses a local traffic proxy and installs a trusted certificate on Windows. Get their explicit approval for that system change. Accepting a WeChat login alone does not authorize certificate installation.
-3. The local GUI's **微信登录·高清下载** button asks the user to choose the standard tool's EXE, shows the certificate/proxy disclosure, and starts it only after the user accepts. The **获取高清工具** button opens its official release page. The GUI passes its selected folder as `WX_CHANNEL_DOWNLOADS_DIR`; verify the actual save location in the third-party tool.
-4. Have the user log in through the official WeChat interface and open the target video in the logged-in playback page. The GUI copies the first pasted share link to the clipboard to help locate that video. Never request or store their password, cookies, or session tokens.
-5. Use the tool's single-video download menu. Its documented behavior is to use a clearly returned original `fullUrl` when available; otherwise it automatically picks the highest available `spec` by bitrate. Save the returned media stream without re-encoding.
+3. The GUI's **打开微信（扫码登录）** button launches the installed official WeChat desktop client. If the client is not logged in, the user scans its QR code and confirms on their phone; if already logged in, it opens the existing session. This is desktop-client login, not OAuth authorization to this Skill.
+4. The separate **启动高清工具** button asks the user to choose the standard tool's EXE, shows the certificate/proxy disclosure, and starts it only after the user accepts. The **获取高清工具** button opens its official release page. The GUI passes its selected folder as `WX_CHANNEL_DOWNLOADS_DIR`; verify the actual save location in the third-party tool. The GUI copies the first pasted share link to the clipboard to help locate the target video. Never request or store the user's password, cookies, or session tokens.
+5. Open the target video in the logged-in WeChat playback page and use the tool's single-video download menu. Its documented behavior is to use a clearly returned original `fullUrl` when available; otherwise it automatically picks the highest available `spec` by bitrate. Save the returned media stream without re-encoding.
 6. Verify the saved video's resolution and, when available, bitrate with `ffprobe` or file metadata. Compare with any existing download before claiming a quality improvement. For the previously tested share link, the quick download was 1024×576; file size or H.265 encoding alone does not prove greater quality.
+
+Official WeChat website OAuth login requires an approved website application, AppID, AppSecret, and a registered callback domain. Its documented `snsapi_login` scope handles identity authorization; it is not a substitute for a logged-in desktop playback session or a video download grant. Do not describe opening the WeChat client as OAuth authorization to this Skill.
 
 If the logged-in page offers no stream above the previous version, say so. The highest stream available to a viewer is not necessarily the uploader's original file. Do not manufacture detail by upscaling and call it a higher-quality source.
 
